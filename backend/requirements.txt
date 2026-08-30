@@ -60,6 +60,7 @@ psycopg-binary==3.3.4
 pycparser==3.0
 Pygments==2.20.0
 pymongo==4.17.0
+pypdf>=6.0.0
 pyparsing==3.3.2
 PySocks==1.7.1
 python-dateutil==2.9.0.post0
@@ -84,3 +85,5 @@ urllib3==2.7.0
 Werkzeug==3.1.8
 wheel==0.47.0
 wrapt==2.2.2
+cryptography==50.0.0
+cffi==2.1.1

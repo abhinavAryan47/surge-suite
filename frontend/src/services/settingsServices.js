@@ -26,5 +26,40 @@ export const settingsServices = {
    */
   deleteProviderKey(provider) {
     return api.delete(`/settings/providers/${provider}/`);
+  },
+
+  /**
+   * Retrieve list of built-in MCP servers and their tools.
+   */
+  getBuiltinMCPs() {
+    return api.get('/mcp/builtin/');
+  },
+
+  /**
+   * Retrieve list of user's custom MCP configurations.
+   */
+  listCustomMCPs() {
+    return api.get('/mcp/custom/');
+  },
+
+  /**
+   * Create a new custom MCP configuration.
+   */
+  createCustomMCP(data) {
+    return api.post('/mcp/custom/', data);
+  },
+
+  /**
+   * Update an existing custom MCP configuration.
+   */
+  updateCustomMCP(id, data) {
+    return api.put(`/mcp/custom/${id}/`, data);
+  },
+
+  /**
+   * Delete a custom MCP configuration.
+   */
+  deleteCustomMCP(id) {
+    return api.delete(`/mcp/custom/${id}/`);
   }
 };

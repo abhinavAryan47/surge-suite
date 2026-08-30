@@ -4,6 +4,16 @@ import { useAuth } from '../context/AuthContext';
 import ThemeToggle from '../components/ThemeToggle';
 import Notes from './Notes.jsx';
 import SettingsTab from '../components/SettingsTab';
+import DMAgentTab from '../components/DMAgentTab';
+import MyRequestsTab from '../components/MyRequestsTab';
+import ReviewCenterTab from '../components/ReviewCenterTab';
+import NotificationCenter from '../components/NotificationCenter';
+import WorkspaceSettingsModal from '../components/WorkspaceSettingsModal';
+import WorkspaceMembersModal from '../components/WorkspaceMembersModal';
+import MarkdownRenderer from '../components/MarkdownRenderer';
+import VoiceCommandButton from '../components/VoiceCommandButton';
+import AudioResponsePlayer from '../components/AudioResponsePlayer';
+import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 import { workspaceServices } from '../services/workspaceServices';
 import { taskServices } from '../services/taskServices';
 import { 
@@ -12,6 +22,7 @@ import {
   FileText, 
   FolderOpen, 
   Settings, 
+  Sliders,
   LogOut, 
   Plus, 
   Menu, 
@@ -23,13 +34,20 @@ import {
   Database,
   AlertCircle,
   Archive,
-  ClipboardList
+  ClipboardList,
+  MessageSquare,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldX,
+  Inbox,
+  FileCheck
 } from 'lucide-react';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('Workspaces');
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
 
   // Real-time states representing workspaces
   const [workspaces, setWorkspaces] = useState([]);
@@ -45,19 +63,46 @@ export default function Dashboard() {
   // Membership modal states
   const [membersModalOpen, setMembersModalOpen] = useState(false);
   const [membersWorkspace, setMembersWorkspace] = useState(null);
-  const [membersList, setMembersList] = useState([]);
-  const [allUsersList, setAllUsersList] = useState([]);
-  const [selectedUserToAdd, setSelectedUserToAdd] = useState('');
+
+  // Workspace Settings & Context Modal states
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [settingsWorkspace, setSettingsWorkspace] = useState(null);
 
   const [pinnedFiles, setPinnedFiles] = useState([]);
 
   // Task & Agent execution state variables
   const [tasks, setTasks] = useState([]);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [showRawLogs, setShowRawLogs] = useState(false);
   const [taskProblemStatement, setTaskProblemStatement] = useState('');
   const [tasksLoading, setTasksLoading] = useState(false);
   const [executingTaskId, setExecutingTaskId] = useState(null);
   const [taskError, setTaskError] = useState('');
+  // Phase 4.7: approval action state
+  const [approvalLoading, setApprovalLoading] = useState(false);
+  const [approvalError, setApprovalError] = useState('');
+  const [viewingWalkthrough, setViewingWalkthrough] = useState(false);
+
+  // Voice recognition hook for multilingual voice commands
+  const {
+    isListening: isVoiceListening,
+    interimTranscript: voiceInterimTranscript,
+    language: voiceLanguage,
+    changeLanguage: setVoiceLanguage,
+    startListening: startVoiceListening,
+    stopListening: stopVoiceListening,
+    error: voiceError,
+    isSupported: isVoiceSupported
+  } = useVoiceRecognition({
+    onResult: (fullText) => {
+      setTaskProblemStatement(fullText);
+    }
+  });
+
+  const activeWs = workspaces.find(w => w.id === activeWorkspaceId);
+  const activeWsRole = activeWs?.role || 'MEMBER';
+  const isViewerRole = activeWsRole === 'VIEWER';
+  const isOwnerOrAdmin = activeWsRole === 'OWNER' || activeWsRole === 'ADMIN';
 
   const loadTasks = async (wsId) => {
     if (!wsId) return;
@@ -85,6 +130,7 @@ export default function Dashboard() {
   const handleExecuteTask = async (taskId) => {
     setExecutingTaskId(taskId);
     setTaskError('');
+    setApprovalError('');
     try {
       await taskServices.execute(taskId);
       await refreshTaskDetails(taskId);
@@ -94,6 +140,36 @@ export default function Dashboard() {
       await refreshTaskDetails(taskId);
     } finally {
       setExecutingTaskId(null);
+    }
+  };
+
+  const handleApproveCommand = async (taskId, approvalId) => {
+    setApprovalLoading(true);
+    setApprovalError('');
+    try {
+      await taskServices.approve(taskId, approvalId);
+      await refreshTaskDetails(taskId);
+    } catch (err) {
+      console.error(err);
+      setApprovalError("Approval failed: " + (err.response?.data?.error || err.message));
+      await refreshTaskDetails(taskId);
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
+
+  const handleDenyCommand = async (taskId, approvalId) => {
+    setApprovalLoading(true);
+    setApprovalError('');
+    try {
+      await taskServices.deny(taskId, approvalId);
+      await refreshTaskDetails(taskId);
+    } catch (err) {
+      console.error(err);
+      setApprovalError("Denial failed: " + (err.response?.data?.error || err.message));
+      await refreshTaskDetails(taskId);
+    } finally {
+      setApprovalLoading(false);
     }
   };
 
@@ -123,11 +199,22 @@ export default function Dashboard() {
     }
   }, [activeWorkspaceId, activeTab]);
 
-  // Periodic polling for task status if currently selected task is RUNNING or PENDING
+  // Fetch details immediately when selectedTaskId changes
+  useEffect(() => {
+    if (selectedTaskId) {
+      refreshTaskDetails(selectedTaskId);
+    }
+  }, [selectedTaskId]);
+
+  // Periodic polling for task status if currently selected task is RUNNING, PENDING, or WAITING_FOR_APPROVAL
   useEffect(() => {
     if (!selectedTaskId || activeTab !== 'Tasks') return;
     const selectedTask = tasks.find(t => t.id === selectedTaskId);
-    if (!selectedTask || (selectedTask.status !== 'RUNNING' && selectedTask.status !== 'PENDING')) return;
+    if (!selectedTask || (
+      selectedTask.status !== 'RUNNING' &&
+      selectedTask.status !== 'PENDING' &&
+      selectedTask.status !== 'WAITING_FOR_APPROVAL'
+    )) return;
 
     const interval = setInterval(() => {
       refreshTaskDetails(selectedTaskId);
@@ -279,45 +366,10 @@ export default function Dashboard() {
     }
   };
 
-  const handleOpenMembers = async (ws) => {
-    try {
-      setWorkspaceError(null);
-      setMembersWorkspace(ws);
-      const membersRes = await workspaceServices.listMembers(ws.id);
-      setMembersList(membersRes.data);
-      const usersRes = await workspaceServices.listAllUsers();
-      setAllUsersList(usersRes.data);
-      setMembersModalOpen(true);
-    } catch (err) {
-      setWorkspaceError("Failed to open membership dashboard.");
-    }
-  };
-
-  const handleAddMember = async () => {
-    if (!selectedUserToAdd) return;
-    try {
-      setWorkspaceError(null);
-      await workspaceServices.addMember(membersWorkspace.id, { user_id: selectedUserToAdd });
-      setSelectedUserToAdd('');
-      // Reload members
-      const membersRes = await workspaceServices.listMembers(membersWorkspace.id);
-      setMembersList(membersRes.data);
-    } catch (err) {
-      const msg = err.response?.data?.error || "Failed to add member.";
-      setWorkspaceError(msg);
-    }
-  };
-
-  const handleRemoveMember = async (userId) => {
-    try {
-      setWorkspaceError(null);
-      await workspaceServices.removeMember(membersWorkspace.id, userId);
-      // Reload members
-      const membersRes = await workspaceServices.listMembers(membersWorkspace.id);
-      setMembersList(membersRes.data);
-    } catch (err) {
-      setWorkspaceError("Failed to remove member.");
-    }
+  const handleOpenMembers = (ws) => {
+    setWorkspaceError(null);
+    setMembersWorkspace(ws);
+    setMembersModalOpen(true);
   };
 
   // Boot-time auto-purge for items older than 30 days
@@ -467,6 +519,9 @@ export default function Dashboard() {
             { name: 'Spreadsheets', icon: Table },
             { name: 'Notes', icon: FileText },
             { name: 'Tasks', icon: ClipboardList },
+            { name: 'My Requests', icon: Inbox },
+            ...(isOwnerOrAdmin ? [{ name: 'Review Center', icon: ShieldCheck }] : []),
+            { name: 'DM Agent', icon: MessageSquare },
             { name: 'Shared Files', icon: FolderOpen },
             { name: 'Settings', icon: Settings }
           ].map((item) => {
@@ -517,6 +572,21 @@ export default function Dashboard() {
           </div>
 
           <div style={styles.headerRight}>
+            <NotificationCenter 
+              workspaceId={activeWorkspaceId} 
+              onSelectRequest={(reqId, notifType) => {
+                setSelectedRequestId(reqId);
+                if (notifType === 'REQUEST_ESCALATED' || notifType === 'NEW_REQUEST') {
+                  if (isOwnerOrAdmin) {
+                    setActiveTab('Review Center');
+                  } else {
+                    setActiveTab('My Requests');
+                  }
+                } else {
+                  setActiveTab('My Requests');
+                }
+              }} 
+            />
             <ThemeToggle />
             <div style={styles.profileBadge}>{firstName.substring(0, 2).toUpperCase()}</div>
           </div>
@@ -630,13 +700,27 @@ export default function Dashboard() {
                                 Select Workspace
                               </button>
                             )}
+                            <button 
+                              onClick={() => {
+                                setSettingsWorkspace(ws);
+                                setSettingsModalOpen(true);
+                              }} 
+                              style={styles.iconBtn} 
+                              title="Workspace Settings & Context"
+                            >
+                              Settings
+                            </button>
+                            <button 
+                              onClick={() => handleOpenMembers(ws)} 
+                              style={styles.iconBtn} 
+                              title={isOwner ? "Manage Workspace Members" : "View Workspace Members"}
+                            >
+                              Members
+                            </button>
                             {isOwner && !isEditing && (
                               <>
                                 <button onClick={() => handleStartEdit(ws)} style={styles.iconBtn} title="Rename Workspace">
                                   Rename
-                                </button>
-                                <button onClick={() => handleOpenMembers(ws)} style={styles.iconBtn} title="Manage Members">
-                                  Members
                                 </button>
                                 <button onClick={() => handleArchiveWorkspace(ws.id)} style={{ ...styles.iconBtn, color: 'var(--status-error)' }} title="Archive Workspace">
                                   Archive
@@ -683,51 +767,20 @@ export default function Dashboard() {
               )}
 
               {/* Members Management Modal */}
-              {membersModalOpen && membersWorkspace && (
-                <div style={styles.modalOverlay}>
-                  <div style={styles.modalContent}>
-                    <h3 style={styles.modalTitle}>Manage Members for "{membersWorkspace.name}"</h3>
-                    
-                    <div style={{ marginBottom: '16px' }}>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '6px' }}>Add New Member</label>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <select
-                          value={selectedUserToAdd}
-                          onChange={(e) => setSelectedUserToAdd(e.target.value)}
-                          style={styles.selectInput}
-                        >
-                          <option value="">Select a user...</option>
-                          {allUsersList.map(u => (
-                            <option key={u.id} value={u.id}>{u.first_name || u.username}</option>
-                          ))}
-                        </select>
-                        <button onClick={handleAddMember} style={styles.actionBtn}>Add</button>
-                      </div>
-                    </div>
+              <WorkspaceMembersModal
+                workspace={membersWorkspace}
+                isOpen={membersModalOpen}
+                onClose={() => setMembersModalOpen(false)}
+                onWorkspaceUpdated={fetchWorkspaces}
+              />
 
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '6px' }}>Current Members</label>
-                    <div style={styles.membersList}>
-                      {membersList.length > 0 ? (
-                        membersList.map(mem => (
-                          <div key={mem.id} style={styles.memberRow}>
-                            <span>{mem.user.first_name || mem.user.username} ({mem.role})</span>
-                            <button onClick={() => handleRemoveMember(mem.user.id)} style={styles.removeBtn}>Remove</button>
-                          </div>
-                        ))
-                      ) : (
-                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No members added yet.</p>
-                      )}
-                    </div>
-
-                    <button 
-                      onClick={() => setMembersModalOpen(false)} 
-                      style={{ ...styles.actionBtn, width: '100%', marginTop: '20px', background: 'var(--bg-hover)', color: 'var(--text-primary)' }}
-                    >
-                      Close Dashboard
-                    </button>
-                  </div>
-                </div>
-              )}
+              {/* Workspace Settings & Context Layer Modal */}
+              <WorkspaceSettingsModal
+                workspace={settingsWorkspace}
+                isOpen={settingsModalOpen}
+                onClose={() => setSettingsModalOpen(false)}
+                onWorkspaceUpdated={fetchWorkspaces}
+              />
 
             </div>
           ) : activeTab === 'Notes' ? (
@@ -784,7 +837,7 @@ export default function Dashboard() {
                   };
 
                   return (
-                    <div style={styles.tasksContainer}>
+                    <div className="tasks-container-redesign">
                       {/* Left Column: Create Task & Task List */}
                       <div style={styles.tasksLeftCol}>
                         {/* Active Workspace AI Config Banner */}
@@ -819,22 +872,74 @@ export default function Dashboard() {
                             <h3 style={styles.sectionTitle}>New Agent Task</h3>
                           </div>
                           <form onSubmit={handleCreateTask} style={styles.taskForm}>
-                            <textarea
-                              value={taskProblemStatement}
-                              onChange={(e) => setTaskProblemStatement(e.target.value)}
-                              placeholder="Describe the task you want to execute (e.g. Research Python OCR libraries)..."
-                              style={styles.taskTextarea}
-                              rows={3}
-                              disabled={executingTaskId !== null}
-                            />
-                            <button
-                              type="submit"
-                              className="action-btn"
-                              style={{ ...styles.actionBtn, marginTop: '12px' }}
-                              disabled={executingTaskId !== null || !taskProblemStatement.trim()}
-                            >
-                              {executingTaskId ? 'Executing...' : 'Run Task'}
-                            </button>
+                            <div style={{ position: 'relative' }}>
+                              {isVoiceListening && (
+                                <div style={styles.voiceActiveBanner}>
+                                  <span style={styles.voiceActivePulse} />
+                                  <span style={styles.voiceActiveText}>
+                                    Listening in {voiceLanguage === 'hi-IN' ? 'हिन्दी' : voiceLanguage === 'bn-IN' ? 'বাংলা' : voiceLanguage === 'or-IN' ? 'ଓଡ଼ିଆ' : 'English'}... Speak now
+                                  </span>
+                                  {voiceInterimTranscript && (
+                                    <span style={styles.voiceInterimLive}>
+                                      "{voiceInterimTranscript}"
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              <textarea
+                                value={taskProblemStatement}
+                                onChange={(e) => setTaskProblemStatement(e.target.value)}
+                                placeholder={
+                                  isViewerRole
+                                    ? "🔒 You have read-only (VIEWER) access to this workspace. Task execution is disabled."
+                                    : isVoiceListening
+                                    ? "🎙️ Listening... speak in your language (e.g. 'create note', 'book a lab')..."
+                                    : "Describe the task to execute, or click Voice Input to speak in English, हिन्दी, বাংলা, or ଓଡ଼ିଆ..."
+                                }
+                                style={{
+                                  ...styles.taskTextarea,
+                                  border: isVoiceListening ? '1px solid var(--status-error, #ef4444)' : styles.taskTextarea.border,
+                                  boxShadow: isVoiceListening ? '0 0 0 2px rgba(239, 68, 68, 0.2)' : 'none',
+                                  opacity: isViewerRole ? 0.6 : 1,
+                                  cursor: isViewerRole ? 'not-allowed' : 'text'
+                                }}
+                                rows={3}
+                                disabled={isViewerRole || executingTaskId !== null}
+                              />
+                            </div>
+                            <div style={styles.taskFormActions}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <VoiceCommandButton
+                                  isListening={isVoiceListening}
+                                  onStart={() => startVoiceListening(taskProblemStatement)}
+                                  onStop={stopVoiceListening}
+                                  selectedLanguage={voiceLanguage}
+                                  onLanguageChange={setVoiceLanguage}
+                                  error={voiceError}
+                                  isSupported={isVoiceSupported}
+                                  disabled={isViewerRole || executingTaskId !== null}
+                                />
+                                <AudioResponsePlayer
+                                  text={taskProblemStatement}
+                                  defaultLang={voiceLanguage}
+                                  compact={true}
+                                  label="Listen to Input"
+                                />
+                              </div>
+                              <button
+                                type="submit"
+                                className="action-btn"
+                                style={{
+                                  ...styles.actionBtn,
+                                  opacity: (isViewerRole || executingTaskId !== null || !taskProblemStatement.trim()) ? 0.5 : 1,
+                                  cursor: (isViewerRole || executingTaskId !== null || !taskProblemStatement.trim()) ? 'not-allowed' : 'pointer'
+                                }}
+                                disabled={isViewerRole || executingTaskId !== null || !taskProblemStatement.trim()}
+                                title={isViewerRole ? "Viewers cannot execute tasks" : ""}
+                              >
+                                {executingTaskId ? 'Executing...' : 'Run Task'}
+                              </button>
+                            </div>
                           </form>
                         </section>
 
@@ -870,9 +975,9 @@ export default function Dashboard() {
                                     <div style={styles.taskItemHeader}>
                                       <span style={{
                                         ...styles.statusBadge,
-                                        background: t.status === 'COMPLETED' ? 'rgba(34, 197, 94, 0.1)' : t.status === 'FAILED' ? 'rgba(239, 68, 68, 0.1)' : t.status === 'RUNNING' ? 'rgba(234, 179, 8, 0.1)' : 'rgba(107, 114, 128, 0.1)',
-                                        color: t.status === 'COMPLETED' ? 'var(--status-success, #22c55e)' : t.status === 'FAILED' ? 'var(--status-error, #ef4444)' : t.status === 'RUNNING' ? 'var(--status-warning, #eab308)' : 'var(--text-muted)',
-                                        border: t.status === 'COMPLETED' ? '1px solid rgba(34, 197, 94, 0.2)' : t.status === 'FAILED' ? '1px solid rgba(239, 68, 68, 0.2)' : t.status === 'RUNNING' ? '1px solid rgba(234, 179, 8, 0.2)' : '1px solid rgba(107, 114, 128, 0.2)'
+                                       background: t.status === 'COMPLETED' ? 'rgba(34, 197, 94, 0.1)' : t.status === 'FAILED' ? 'rgba(239, 68, 68, 0.1)' : t.status === 'RUNNING' ? 'rgba(234, 179, 8, 0.1)' : t.status === 'WAITING_FOR_APPROVAL' ? 'rgba(249, 115, 22, 0.15)' : 'rgba(107, 114, 128, 0.1)',
+                                        color: t.status === 'COMPLETED' ? 'var(--status-success, #22c55e)' : t.status === 'FAILED' ? 'var(--status-error, #ef4444)' : t.status === 'RUNNING' ? 'var(--status-warning, #eab308)' : t.status === 'WAITING_FOR_APPROVAL' ? '#f97316' : 'var(--text-muted)',
+                                        border: t.status === 'COMPLETED' ? '1px solid rgba(34, 197, 94, 0.2)' : t.status === 'FAILED' ? '1px solid rgba(239, 68, 68, 0.2)' : t.status === 'RUNNING' ? '1px solid rgba(234, 179, 8, 0.2)' : t.status === 'WAITING_FOR_APPROVAL' ? '1px solid rgba(249, 115, 22, 0.4)' : '1px solid rgba(107, 114, 128, 0.2)'
                                       }}>
                                         {t.status}
                                       </span>
@@ -891,8 +996,9 @@ export default function Dashboard() {
                         </section>
                       </div>
 
-                      {/* Right Column: Task Detail View */}
-                      <div style={styles.tasksRightCol}>
+                      {/* Right Column: Task Detail View & Approval Section wrapper */}
+                      <div className="tasks-right-side-wrapper">
+                        <div className="tasks-right-col-redesign">
                         {selectedTaskId ? (
                           (() => {
                             const selectedTask = tasks.find(t => t.id === selectedTaskId);
@@ -906,7 +1012,7 @@ export default function Dashboard() {
                               <div style={styles.taskDetailCard}>
                                 <div style={styles.detailCardHeader}>
                                   <h3 style={styles.detailTitle}>Task Details</h3>
-                                  {selectedTask.status !== 'RUNNING' && (
+                                  {selectedTask.status !== 'RUNNING' && selectedTask.status !== 'WAITING_FOR_APPROVAL' && (
                                     <button
                                       onClick={() => handleExecuteTask(selectedTask.id)}
                                       style={{ ...styles.btnSave, padding: '6px 12px', border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontWeight: '600', fontSize: 'var(--text-xs)' }}
@@ -926,9 +1032,9 @@ export default function Dashboard() {
                                     <span style={styles.detailTableLabel}>Status</span>
                                     <span style={{
                                       ...styles.statusBadge,
-                                      background: selectedTask.status === 'COMPLETED' ? 'rgba(34, 197, 94, 0.1)' : selectedTask.status === 'FAILED' ? 'rgba(239, 68, 68, 0.1)' : selectedTask.status === 'RUNNING' ? 'rgba(234, 179, 8, 0.1)' : 'rgba(107, 114, 128, 0.1)',
-                                      color: selectedTask.status === 'COMPLETED' ? 'var(--status-success, #22c55e)' : selectedTask.status === 'FAILED' ? 'var(--status-error, #ef4444)' : selectedTask.status === 'RUNNING' ? 'var(--status-warning, #eab308)' : 'var(--text-muted)',
-                                      border: selectedTask.status === 'COMPLETED' ? '1px solid rgba(34, 197, 94, 0.2)' : selectedTask.status === 'FAILED' ? '1px solid rgba(239, 68, 68, 0.2)' : selectedTask.status === 'RUNNING' ? '1px solid rgba(234, 179, 8, 0.2)' : '1px solid rgba(107, 114, 128, 0.2)'
+                                      background: selectedTask.status === 'COMPLETED' ? 'rgba(34, 197, 94, 0.1)' : selectedTask.status === 'FAILED' ? 'rgba(239, 68, 68, 0.1)' : selectedTask.status === 'RUNNING' ? 'rgba(234, 179, 8, 0.1)' : selectedTask.status === 'WAITING_FOR_APPROVAL' ? 'rgba(249, 115, 22, 0.15)' : 'rgba(107, 114, 128, 0.1)',
+                                      color: selectedTask.status === 'COMPLETED' ? 'var(--status-success, #22c55e)' : selectedTask.status === 'FAILED' ? 'var(--status-error, #ef4444)' : selectedTask.status === 'RUNNING' ? 'var(--status-warning, #eab308)' : selectedTask.status === 'WAITING_FOR_APPROVAL' ? '#f97316' : 'var(--text-muted)',
+                                      border: selectedTask.status === 'COMPLETED' ? '1px solid rgba(34, 197, 94, 0.2)' : selectedTask.status === 'FAILED' ? '1px solid rgba(239, 68, 68, 0.2)' : selectedTask.status === 'RUNNING' ? '1px solid rgba(234, 179, 8, 0.2)' : selectedTask.status === 'WAITING_FOR_APPROVAL' ? '1px solid rgba(249, 115, 22, 0.4)' : '1px solid rgba(107, 114, 128, 0.2)'
                                     }}>
                                       {selectedTask.status}
                                     </span>
@@ -960,45 +1066,287 @@ export default function Dashboard() {
                                       {execMode}
                                     </span>
                                   </div>
+
+                                  <div style={styles.detailRow}>
+                                    <span style={styles.detailTableLabel}>Capabilities</span>
+                                    <span style={styles.detailTableValue}>
+                                      {(() => {
+                                        const mcpEvent = selectedTask.events?.find(e => e.event_type === 'MCP_DISCOVERY_COMPLETED');
+                                        const count = mcpEvent?.metadata?.tools_discovered?.length || 0;
+                                        return count > 0 ? `${count} MCP tools discovered` : 'No MCP tools discovered';
+                                      })()}
+                                    </span>
+                                  </div>
                                 </div>
 
-                                {/* Final Output Result */}
-                                {selectedTask.result && (
-                                  <div style={styles.resultBoxRedesign}>
-                                    <h4 style={styles.resultHeader}>Execution Result Output</h4>
-                                    <div style={styles.resultContentRedesign}>
-                                      {selectedTask.result}
+
+
+                                {/* Agent Result Section */}
+                                {selectedTask.status === 'COMPLETED' ? (
+                                  selectedTask.result ? (
+                                    <div style={styles.resultBoxRedesign}>
+                                      <h4 style={{...styles.resultHeader, borderLeft: '4px solid var(--status-success, #22c55e)'}}>Agent Result</h4>
+                                      <AudioResponsePlayer text={selectedTask.result} defaultLang={voiceLanguage} />
+                                      <div style={{ padding: '16px' }}>
+                                        <MarkdownRenderer text={selectedTask.result} />
+                                      </div>
                                     </div>
+                                  ) : (
+                                    <div style={{
+                                      marginTop: '20px',
+                                      padding: '16px',
+                                      backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                                      border: '1px dashed var(--status-error, #ef4444)',
+                                      borderRadius: 'var(--radius-md)',
+                                      color: 'var(--status-error, #ef4444)',
+                                      fontSize: '13px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px'
+                                    }}>
+                                      <span>⚠️</span>
+                                      <span>The agent completed execution but did not produce a final response.</span>
+                                    </div>
+                                  )
+                                ) : selectedTask.status === 'FAILED' ? (
+                                  <div style={{
+                                    marginTop: '20px',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                                    borderRadius: 'var(--radius-md)',
+                                    overflow: 'hidden'
+                                  }}>
+                                    <h4 style={{
+                                      ...styles.resultHeader,
+                                      borderBottom: '1px solid rgba(239, 68, 68, 0.2)',
+                                      color: 'var(--status-error, #ef4444)',
+                                      borderLeft: '4px solid var(--status-error, #ef4444)'
+                                    }}>
+                                      Execution Failed
+                                    </h4>
+                                    <div style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                      <p style={{ margin: '0 0 8px 0', fontWeight: '600', color: 'var(--status-error, #ef4444)' }}>
+                                        The task could not be completed successfully.
+                                      </p>
+                                      <div style={{ fontFamily: 'monospace', fontSize: '12px', background: 'rgba(0,0,0,0.05)', padding: '10px', borderRadius: '4px', whiteSpace: 'pre-wrap' }}>
+                                        {selectedTask.result || (activeExec?.error) || "The task execution failed with an unknown error."}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : null}
+
+                                {/* Execution Walkthrough Artifact Section */}
+                                {selectedTask.walkthrough && (
+                                  <div style={{ marginTop: '20px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                      <h4 style={styles.timelineHeader}>Execution Walkthrough</h4>
+                                      <div style={{ display: 'flex', gap: '8px' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setViewingWalkthrough(!viewingWalkthrough)}
+                                          style={{
+                                            padding: '4px 10px',
+                                            fontSize: '12px',
+                                            fontWeight: '600',
+                                            color: 'var(--text-primary)',
+                                            background: 'var(--bg-hover)',
+                                            border: '1px solid var(--border-light)',
+                                            borderRadius: 'var(--radius-sm)',
+                                            cursor: 'pointer'
+                                          }}
+                                        >
+                                          {viewingWalkthrough ? 'Hide walkthrough.md' : 'View walkthrough.md'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const blob = new Blob([selectedTask.walkthrough], { type: 'text/markdown' });
+                                            const url = URL.createObjectURL(blob);
+                                            const a = document.createElement('a');
+                                            a.href = url;
+                                            a.download = `walkthrough-${selectedTask.id.slice(0, 8)}.md`;
+                                            a.click();
+                                            URL.revokeObjectURL(url);
+                                          }}
+                                          style={{
+                                            padding: '4px 10px',
+                                            fontSize: '12px',
+                                            fontWeight: '600',
+                                            color: 'var(--text-primary)',
+                                            background: 'var(--bg-hover)',
+                                            border: '1px solid var(--border-light)',
+                                            borderRadius: 'var(--radius-sm)',
+                                            cursor: 'pointer'
+                                          }}
+                                        >
+                                          Download
+                                        </button>
+                                      </div>
+                                    </div>
+                                    {viewingWalkthrough && (
+                                      <div style={{
+                                        padding: '16px',
+                                        background: 'var(--bg-primary)',
+                                        border: '1px solid var(--border-light)',
+                                        borderRadius: 'var(--radius-md)',
+                                        maxHeight: '400px',
+                                        overflowY: 'auto'
+                                      }}>
+                                        <MarkdownRenderer text={selectedTask.walkthrough} />
+                                      </div>
+                                    )}
                                   </div>
                                 )}
 
-                                {/* Events Timeline */}
+                                {/* Tools Used */}
+                                {(() => {
+                                  const executedTools = [];
+                                  selectedTask.events?.forEach(event => {
+                                    if (event.event_type === 'TOOL_COMPLETED' && event.metadata?.tool_name) {
+                                      if (!executedTools.includes(event.metadata.tool_name)) {
+                                        executedTools.push(event.metadata.tool_name);
+                                      }
+                                    }
+                                  });
+                                  if (executedTools.length === 0) return null;
+                                  return (
+                                    <div style={{ marginTop: '24px' }}>
+                                      <h4 style={styles.timelineHeader}>Tools Used</h4>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', background: 'var(--bg-hover)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)' }}>
+                                        {executedTools.map(tool => (
+                                          <div key={tool} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--status-success, #22c55e)' }}>
+                                            <span>✓</span>
+                                            <strong style={{ color: 'var(--text-primary)' }}>{tool}</strong>
+                                          </div>
+                                        ))}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--status-success, #22c55e)' }}>
+                                          <span>✓</span>
+                                          <span style={{ color: 'var(--text-secondary)' }}>Final response generated</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+
+                                {/* Human-readable Timeline */}
                                 <div style={{ marginTop: '24px' }}>
-                                  <h4 style={styles.timelineHeader}>Execution Timeline Logs</h4>
+                                  <h4 style={styles.timelineHeader}>Execution Timeline</h4>
                                   <div style={styles.timelineListRedesign}>
                                     {selectedTask.events && selectedTask.events.length > 0 ? (
-                                      selectedTask.events.map((event, idx) => (
-                                        <div key={event.id} style={styles.timelineItemRedesign}>
-                                          <div style={styles.timelineDot} />
-                                          <div style={styles.timelineContentBox}>
-                                            <div style={styles.timelineItemHeaderRedesign}>
-                                              <span style={styles.timelineType}>{event.event_type}</span>
-                                              <span style={styles.timelineTime}>
-                                                {new Date(event.timestamp).toLocaleTimeString()}
-                                              </span>
+                                      (() => {
+                                        const getReadableEventTitle = (event) => {
+                                          const titles = {
+                                            TASK_CREATED: "Task created",
+                                            AGENT_SELECTED: "Agent selected",
+                                            EXECUTION_STARTED: "Execution started",
+                                            TOOL_DISCOVERED: "Capabilities discovered",
+                                            MCP_DISCOVERY_STARTED: "Starting MCP tool discovery",
+                                            MCP_DISCOVERY_COMPLETED: "Discovered MCP tools",
+                                            TOOL_SELECTED: "Tool selected",
+                                            TOOL_STARTED: "Running tool",
+                                            TOOL_COMPLETED: "Tool completed",
+                                            TOOL_FAILED: "Tool execution failed",
+                                            FALLBACK_SELECTED: "Safe fallback selected",
+                                            FINAL_RESPONSE_GENERATED: "Final response generated",
+                                            EXECUTION_COMPLETED: "Execution completed",
+                                            EXECUTION_FAILED: "Execution failed",
+                                            ACTION_STARTED: "Model query started",
+                                            ACTION_COMPLETED: "Model query completed",
+                                            APPROVAL_REQUESTED: "⏸ Awaiting human approval",
+                                            APPROVAL_APPROVED: "✅ Shell command approved",
+                                            APPROVAL_DENIED: "❌ Shell command denied",
+                                            APPROVAL_EXECUTED: "Shell command executed",
+                                            APPROVAL_SECURITY_BLOCKED: "🚫 Command blocked at execution",
+                                          };
+                                          
+                                          let base = titles[event.event_type] || event.event_type;
+                                          if (event.event_type === 'AGENT_SELECTED' && event.metadata?.agent_name) {
+                                            base = `${event.metadata.agent_name} selected`;
+                                          } else if (event.event_type === 'MCP_DISCOVERY_COMPLETED' && event.metadata?.tools_discovered) {
+                                            base = `Discovered ${event.metadata.tools_discovered.length} MCP tools`;
+                                          } else if (event.event_type === 'TOOL_SELECTED' && event.metadata?.tool_name) {
+                                            base = `Tool selected: ${event.metadata.tool_name}`;
+                                          } else if (event.event_type === 'TOOL_STARTED' && event.metadata?.tool_name) {
+                                            base = `Running tool: ${event.metadata.tool_name}`;
+                                          } else if (event.event_type === 'TOOL_COMPLETED' && event.metadata?.tool_name) {
+                                            base = `Tool completed: ${event.metadata.tool_name}`;
+                                          } else if (event.event_type === 'TOOL_FAILED' && event.metadata?.tool_name) {
+                                            base = `Tool execution failed: ${event.metadata.tool_name}`;
+                                          } else if (event.event_type === 'FALLBACK_SELECTED' && event.metadata?.tool_name) {
+                                            base = `Safe fallback selected: ${event.metadata.tool_name}`;
+                                          } else if (event.event_type === 'EXECUTION_FAILED' && event.metadata?.error) {
+                                            base = `Execution failed: ${event.metadata.error}`;
+                                          }
+                                          return base;
+                                        };
+
+                                        return selectedTask.events.map((event, idx) => {
+                                          const isError = event.event_type === 'EXECUTION_FAILED' || (event.event_type === 'ACTION_COMPLETED' && event.metadata?.status === 'FAILED');
+                                          return (
+                                            <div key={event.id} style={styles.timelineItemRedesign}>
+                                              <div style={{
+                                                ...styles.timelineDot,
+                                                backgroundColor: isError ? 'var(--status-error, #ef4444)' : 'var(--status-success, #22c55e)'
+                                              }} />
+                                              <div style={styles.timelineContentBox}>
+                                                <div style={styles.timelineItemHeaderRedesign}>
+                                                  <span style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)' }}>
+                                                    {isError ? '✗' : '✓'} {getReadableEventTitle(event)}
+                                                  </span>
+                                                  <span style={styles.timelineTime}>
+                                                    {new Date(event.timestamp).toLocaleTimeString()}
+                                                  </span>
+                                                </div>
+                                              </div>
                                             </div>
-                                            {event.metadata && Object.keys(event.metadata).length > 0 && (
-                                              <pre style={styles.timelineMeta}>
-                                                {JSON.stringify(event.metadata, null, 2)}
-                                              </pre>
-                                            )}
-                                          </div>
-                                        </div>
-                                      ))
+                                          );
+                                        });
+                                      })()
                                     ) : (
                                       <p style={styles.taskEmptyText}>No timeline events logged.</p>
                                     )}
                                   </div>
+                                </div>
+
+                                {/* Developer / Debug Section */}
+                                <div style={{ marginTop: '24px', borderTop: '1px solid var(--border-light)', paddingTop: '16px' }}>
+                                  <button
+                                    onClick={() => setShowRawLogs(!showRawLogs)}
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: 'var(--text-secondary)',
+                                      cursor: 'pointer',
+                                      fontSize: '12px',
+                                      fontWeight: '600',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      padding: 0
+                                    }}
+                                  >
+                                    {showRawLogs ? '▼ Hide Developer Details' : '▶ Show Developer Details'}
+                                  </button>
+                                  {showRawLogs && (
+                                    <div style={{ marginTop: '12px' }}>
+                                      <h5 style={{ ...styles.timelineHeader, margin: '0 0 8px 0' }}>Raw Debug Logs</h5>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                        {selectedTask.events?.map(event => (
+                                          <div key={event.id} style={{ padding: '10px', background: 'var(--bg-input)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-medium)', fontFamily: 'monospace', fontSize: '11px' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                              <span style={{ fontWeight: '600', color: 'var(--status-error)' }}>{event.event_type}</span>
+                                              <span style={{ color: 'var(--text-muted)' }}>{new Date(event.timestamp).toLocaleTimeString()}</span>
+                                            </div>
+                                            {event.metadata && (
+                                              <pre style={{ margin: 0, overflowX: 'auto', color: 'var(--text-secondary)' }}>
+                                                {JSON.stringify(event.metadata, null, 2)}
+                                              </pre>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -1010,13 +1358,187 @@ export default function Dashboard() {
                           </div>
                         )}
                       </div>
+
+                      {/* Right Column: Approval Panel */}
+                      {(() => {
+                        if (!selectedTaskId) return null;
+                        const selectedTask = tasks.find(t => t.id === selectedTaskId);
+                        if (!selectedTask || selectedTask.status !== 'WAITING_FOR_APPROVAL' || !selectedTask.pending_approval) return null;
+                        const ap = selectedTask.pending_approval;
+                        return (
+                          <div className="tasks-approval-panel-redesign">
+                            <h3 style={styles.detailTitle}>Approval Required</h3>
+                            
+                            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', lineHeight: '1.4', marginTop: '-4px' }}>
+                              Agent execution is paused. This command requires your authorization before proceeding.
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <span style={{ fontSize: 'var(--text-xs)', fontWeight: '600', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                Requested Command
+                              </span>
+                              <code style={{
+                                display: 'block',
+                                padding: '12px',
+                                background: 'var(--bg-input, #1f1f23)',
+                                borderRadius: 'var(--radius-sm)',
+                                fontSize: '13px',
+                                fontFamily: 'monospace',
+                                color: 'var(--text-primary)',
+                                wordBreak: 'break-all',
+                                border: '1px solid var(--border-medium)',
+                                lineHeight: '1.4'
+                              }}>{ap.sanitized_display_command}</code>
+                            </div>
+
+                            {ap.reason && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <span style={{ fontSize: 'var(--text-xs)', fontWeight: '600', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                  Agent Reasoning
+                                </span>
+                                <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: '1.4' }}>{ap.reason}</p>
+                              </div>
+                            )}
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <span style={{ fontSize: 'var(--text-xs)', fontWeight: '600', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Risk Level: </span>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  borderRadius: 'var(--radius-full)',
+                                  fontSize: '10px',
+                                  fontWeight: '700',
+                                  textTransform: 'uppercase',
+                                  background: ap.risk === 'HIGH' ? 'rgba(239, 68, 68, 0.1)' : ap.risk === 'MEDIUM' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                                  color: ap.risk === 'HIGH' ? 'var(--status-error, #ef4444)' : ap.risk === 'MEDIUM' ? 'var(--status-warning, #f59e0b)' : 'var(--status-success, #10b981)',
+                                  border: `1px solid ${ap.risk === 'HIGH' ? 'rgba(239, 68, 68, 0.2)' : ap.risk === 'MEDIUM' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'}`
+                                }}>{ap.risk}</span>
+                              </div>
+                              {ap.expires_at && (
+                                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                                  Expires: {new Date(ap.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              )}
+                            </div>
+
+                            <div style={{ padding: '10px 12px', background: 'rgba(245, 158, 11, 0.04)', borderRadius: 'var(--radius-sm)', fontSize: '11px', color: 'var(--text-secondary)', border: '1px dashed rgba(245, 158, 11, 0.2)' }}>
+                              ⚠️ <strong>Allow Once</strong> executes only this exact command. It does not whitelist future actions.
+                            </div>
+
+                            {(() => {
+                              const isTaskCreator = selectedTask?.creator === currentUser?.user_id || selectedTask?.creator_details?.id === currentUser?.user_id;
+                              const canAuthorize = isOwnerOrAdmin || isTaskCreator;
+                              return !canAuthorize ? (
+                                <div style={{ padding: '8px 12px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 'var(--radius-sm)', fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                                  🔒 Command authorization is restricted to the Task Creator, Workspace Admin, or Workspace Owner.
+                                </div>
+                              ) : null;
+                            })()}
+
+                            {approvalError && (
+                              <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.06)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)', color: 'var(--status-error, #ef4444)' }}>
+                                {approvalError}
+                              </div>
+                            )}
+
+                            {(() => {
+                              const isTaskCreator = selectedTask?.creator === currentUser?.user_id || selectedTask?.creator_details?.id === currentUser?.user_id;
+                              const canAuthorize = isOwnerOrAdmin || isTaskCreator;
+                              return (
+                                <div style={{ display: 'flex', gap: '12px', marginTop: 'auto', paddingTop: '12px' }}>
+                                  <button
+                                    id={`modal-approve-btn-${ap.id}`}
+                                    onClick={() => handleApproveCommand(selectedTask.id, ap.id)}
+                                    disabled={!canAuthorize || approvalLoading}
+                                    style={{
+                                      flex: 1,
+                                      padding: '8px 16px',
+                                      background: 'var(--status-success, #10b981)',
+                                      border: 'none',
+                                      borderRadius: 'var(--radius-sm)',
+                                      color: '#ffffff',
+                                      fontWeight: '600',
+                                      fontSize: 'var(--text-sm)',
+                                      cursor: (!canAuthorize || approvalLoading) ? 'not-allowed' : 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '8px',
+                                      opacity: (!canAuthorize || approvalLoading) ? 0.45 : 1,
+                                      boxShadow: '0 2px 4px rgba(16, 185, 129, 0.15)',
+                                      transition: 'var(--transition-all)'
+                                    }}
+                                  >
+                                    {approvalLoading ? '⏳ Processing...' : 'Allow Once'}
+                                  </button>
+                                  <button
+                                    id={`modal-deny-btn-${ap.id}`}
+                                    onClick={() => handleDenyCommand(selectedTask.id, ap.id)}
+                                    disabled={!canAuthorize || approvalLoading}
+                                    style={{
+                                      flex: 1,
+                                      padding: '8px 16px',
+                                      background: 'rgba(239, 68, 68, 0.08)',
+                                      border: '1px solid var(--status-error, #ef4444)',
+                                      borderRadius: 'var(--radius-sm)',
+                                      color: 'var(--status-error, #ef4444)',
+                                      fontWeight: '600',
+                                      fontSize: 'var(--text-sm)',
+                                      cursor: (!canAuthorize || approvalLoading) ? 'not-allowed' : 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '8px',
+                                      opacity: (!canAuthorize || approvalLoading) ? 0.45 : 1,
+                                      transition: 'var(--transition-all)'
+                                    }}
+                                  >
+                                    {approvalLoading ? '⏳ Processing...' : 'Deny'}
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        );
+                      })()}
                     </div>
+                  </div>
                   );
                 })()
               )}
             </div>
+          ) : activeTab === 'My Requests' ? (
+            !activeWorkspaceId ? (
+              <div style={styles.emptyTabPanel}>
+                <Inbox size={36} strokeWidth={1.25} style={{ color: 'var(--text-muted)', marginBottom: '16px' }} />
+                <h3 style={styles.emptyPanelTitle}>No Workspace Selected</h3>
+                <p style={styles.emptyPanelText}>Please select or create an active workspace first to manage requests.</p>
+              </div>
+            ) : (
+              <MyRequestsTab 
+                workspace={activeWs} 
+                isViewer={isViewerRole} 
+                initialRequestId={selectedRequestId} 
+              />
+            )
+          ) : activeTab === 'Review Center' ? (
+            !activeWorkspaceId ? (
+              <div style={styles.emptyTabPanel}>
+                <ShieldCheck size={36} strokeWidth={1.25} style={{ color: 'var(--text-muted)', marginBottom: '16px' }} />
+                <h3 style={styles.emptyPanelTitle}>No Workspace Selected</h3>
+                <p style={styles.emptyPanelText}>Please select or create an active workspace first to access the Review Center.</p>
+              </div>
+            ) : (
+              <ReviewCenterTab 
+                workspace={activeWs} 
+                userRole={activeWsRole} 
+                initialRequestId={selectedRequestId} 
+              />
+            )
           ) : activeTab === 'Settings' ? (
             <SettingsTab activeWorkspaceId={activeWorkspaceId} onWorkspaceUpdated={fetchWorkspaces} />
+          ) : activeTab === 'DM Agent' ? (
+            <DMAgentTab activeWorkspaceId={activeWorkspaceId} workspaces={workspaces} />
           ) : (
             <div style={styles.emptyTabPanel}>
               <FolderPlus size={36} strokeWidth={1.25} style={{ color: 'var(--text-muted)', marginBottom: '16px' }} />
@@ -1922,5 +2444,45 @@ const styles = {
     color: 'var(--text-muted)',
     textAlign: 'center',
     margin: '20px 0',
+  },
+  taskFormActions: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: '12px',
+    flexWrap: 'wrap',
+    gap: '8px',
+  },
+  voiceActiveBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '6px 12px',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    border: '1px solid rgba(239, 68, 68, 0.25)',
+    borderRadius: 'var(--radius-sm, 6px) var(--radius-sm, 6px) 0 0',
+    marginBottom: '-1px',
+    fontSize: '11px',
+    flexWrap: 'wrap',
+  },
+  voiceActivePulse: {
+    width: '7px',
+    height: '7px',
+    borderRadius: '50%',
+    backgroundColor: 'var(--status-error, #ef4444)',
+    display: 'inline-block',
+    animation: 'pulse 1.5s infinite',
+    flexShrink: 0,
+  },
+  voiceActiveText: {
+    fontWeight: '600',
+    color: 'var(--status-error, #ef4444)',
+    fontSize: '11px',
+  },
+  voiceInterimLive: {
+    fontStyle: 'italic',
+    color: 'var(--text-secondary)',
+    fontSize: '11px',
+    marginLeft: '4px',
   },
 };

@@ -4,14 +4,20 @@ dist/
 dist-ssr/
 *.local
 
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# Environment variables & secrets
+.env*
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+*.env
+*.env.local
+*.env.*.local
+*.secrets*
+credentials.json
+client_secret*.json
 
 # Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -21,6 +27,7 @@ lerna-debug.log*
 # Python virtual environments & caches
 .venv/
 venv/
+backend/venv/
 ENV/
 env/
 __pycache__/
@@ -29,9 +36,11 @@ __pycache__/
 *.pyd
 .pytest_cache/
 .mypy_cache/
+local_settings.py
 
-# macOS system files
+# macOS & OS system files
 .DS_Store
+Thumbs.db
 
 # IDEs / Editors
 .vscode/
@@ -42,23 +51,33 @@ __pycache__/
 *.sln
 *.sw?
 
-# Databases
+# Databases & Backups
 *.sqlite3
 *.sqlite
 *.db
+backend/db.sqlite3
+*.bak
+*.tmp
 
 # Face authentication database fallbacks and legacy files
 backend/authentication/services/registered_faces/
 backend/authentication/services/registered_faces.json
+
+# Surge internal cache/state
+.surge/
 
 # Markdown references and summaries
 *.md
 !docs/**/*.md
 !README.md
 
-# Credentials and Certificates
+# Media, uploaded files, and certificates
+backend/media/
+media/
 *.pem
 *.key
+*.crt
 *.p12
 *.pfx
+
 

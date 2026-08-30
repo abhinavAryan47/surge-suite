@@ -32,7 +32,7 @@ export const taskServices = {
    * Trigger synchronous execution of a task.
    */
   execute(id) {
-    return api.post(`/tasks/${id}/execute/`);
+    return api.post(`/tasks/${id}/execute/`, {}, { timeout: 120000 });
   },
 
   /**
@@ -47,5 +47,21 @@ export const taskServices = {
    */
   retrieveAgent(id) {
     return api.get(`/agents/${id}/`);
-  }
+  },
+
+  /**
+   * Phase 4.7: Approve a pending shell command authorization request.
+   * "Allow Once" — approves ONLY this exact pending command for this task.
+   */
+  approve(taskId, approvalId) {
+    return api.post(`/tasks/${taskId}/approvals/${approvalId}/approve/`, {}, { timeout: 120000 });
+  },
+
+  /**
+   * Phase 4.7: Deny a pending shell command authorization request.
+   * The command will NOT be executed and the agent receives denial feedback.
+   */
+  deny(taskId, approvalId) {
+    return api.post(`/tasks/${taskId}/approvals/${approvalId}/deny/`, {}, { timeout: 120000 });
+  },
 };

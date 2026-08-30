@@ -43,25 +43,31 @@
 :root, .theme-light {
   --bg-app: linear-gradient(135deg, #ffffff 0%, #f3f3f3 100%);
   --bg-app-solid: #f3f3f3;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f4f4f6;
   --bg-card: #ffffff;
   --bg-sidebar: #f8f8fa;
   --bg-input: #ffffff;
   
-  --bg-hover: rgba(0, 0, 0, 0.03);
-  --bg-active: rgba(0, 0, 0, 0.06);
-  --bg-focus-ring: rgba(0, 0, 0, 0.04);
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-active: rgba(0, 0, 0, 0.08);
+  --bg-focus-ring: rgba(0, 0, 0, 0.06);
 
   --text-primary: #111111;
   --text-secondary: #555557;
   --text-muted: #8e8e93;
 
-  --border-light: rgba(0, 0, 0, 0.04);
-  --border-medium: rgba(0, 0, 0, 0.08);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-light: rgba(0, 0, 0, 0.05);
+  --border-medium: rgba(0, 0, 0, 0.12);
   --border-focus: #111111;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.02);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.05);
+  --btn-primary-bg: #111111;
+  --btn-primary-text: #ffffff;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.08);
 
   /* Glassmorphism Specs */
   --glass-bg: rgba(255, 255, 255, 0.65);
@@ -82,21 +88,27 @@
 .theme-dark {
   --bg-app: linear-gradient(135deg, #050505 0%, #111111 100%);
   --bg-app-solid: #09090b;
+  --bg-primary: #09090b;
+  --bg-secondary: #141417;
   --bg-card: #18181b;
   --bg-sidebar: #0e0e10;
   --bg-input: #1f1f23;
   
-  --bg-hover: rgba(255, 255, 255, 0.03);
-  --bg-active: rgba(255, 255, 255, 0.06);
-  --bg-focus-ring: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.1);
+  --bg-focus-ring: rgba(255, 255, 255, 0.06);
 
   --text-primary: #f4f4f5;
   --text-secondary: #a1a1aa;
   --text-muted: #71717a;
 
-  --border-light: rgba(255, 255, 255, 0.04);
-  --border-medium: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-light: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.14);
   --border-focus: #ffffff;
+
+  --btn-primary-bg: #f4f4f5;
+  --btn-primary-text: #09090b;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
@@ -349,4 +361,84 @@ div[style*="profileBadge"]:hover {
   background-color: var(--bg-hover) !important;
 }
 
+/* Redesigned Tasks Layout Grid & Panels */
+.tasks-container-redesign {
+  display: flex;
+  gap: 24px;
+  height: calc(100vh - 180px);
+  margin-top: 16px;
+  align-items: stretch;
+}
 
+.tasks-right-side-wrapper {
+  display: flex;
+  flex-direction: row;
+  gap: 24px;
+  align-items: stretch;
+  height: 100%;
+}
+
+.tasks-right-col-redesign {
+  width: 450px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  padding: 20px;
+  overflow-y: auto;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+.tasks-approval-panel-redesign {
+  width: 450px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  padding: 20px;
+  overflow-y: auto;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+@media (max-width: 1400px) {
+  .tasks-right-side-wrapper {
+    flex-direction: column;
+    align-items: stretch;
+    width: 450px;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+  .tasks-right-col-redesign {
+    width: 100%;
+    height: auto;
+    flex-shrink: 0;
+    overflow-y: visible;
+  }
+  .tasks-approval-panel-redesign {
+    width: 100%;
+    height: auto;
+    flex-shrink: 0;
+    overflow-y: visible;
+  }
+}
+
+@media (max-width: 1024px) {
+  .tasks-container-redesign {
+    flex-direction: column;
+    height: auto;
+    overflow-y: visible;
+  }
+  .tasks-right-side-wrapper {
+    width: 100%;
+  }
+  .tasks-right-col-redesign,
+  .tasks-approval-panel-redesign {
+    width: 100%;
+    height: auto;
+  }
+}

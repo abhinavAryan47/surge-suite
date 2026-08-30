@@ -19,8 +19,7 @@ class RealGeminiModelProvider(ModelProvider):
     def generate(self, prompt: str, system_instruction: str = None, api_key: str = None, model: str = None) -> tuple[str, str]:
         key = api_key or self.api_key
         if not key:
-            # Fall back to simulated execution if credentials are not configured
-            return f"[Simulated Response] Fallback. Prompt: {prompt}", "SIMULATED"
+            return "Error: API key is not configured.", "REAL"
 
         model_name = model or "gemini-1.5-flash"
         # URL key parameter removed for security - key is sent via header
@@ -118,8 +117,7 @@ def get_model_provider_for_agent(agent) -> tuple[ModelProvider, bool]:
         default_model = getattr(settings, "OPENCODE_DEFAULT_MODEL", "gpt-3.5-turbo")
         return OpenAICompatibleModelProvider(base_url, default_model), True
     else:
-        # Unknown/unsupported provider defaults to fake to avoid crashing unexpectedly, but is_real is True
-        return FakeModelProvider(), True
+        raise ValueError(f"Unsupported AI Provider: '{agent.provider}'")
 
 def get_model_provider_by_name(provider_name: str) -> tuple[ModelProvider, bool]:
     """
@@ -149,5 +147,4 @@ def get_model_provider_by_name(provider_name: str) -> tuple[ModelProvider, bool]
         default_model = getattr(settings, "OPENCODE_DEFAULT_MODEL", "gpt-3.5-turbo")
         return OpenAICompatibleModelProvider(base_url, default_model), True
     else:
-        # Unknown/unsupported provider defaults to fake to avoid crashing unexpectedly, but is_real is True
-        return FakeModelProvider(), True
+        raise ValueError(f"Unsupported AI Provider: '{provider_name}'")

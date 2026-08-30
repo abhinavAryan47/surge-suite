@@ -33,3 +33,26 @@ class IsWorkspaceMember(permissions.BasePermission):
         if not request.user.is_authenticated:
             return False
         return obj.owner == request.user or obj.memberships.filter(user=request.user).exists()
+
+class IsWorkspaceAdminOrOwner(permissions.BasePermission):
+    """
+    Permission checking that request.user is an ADMIN or OWNER of the workspace.
+    """
+    def has_object_permission(self, request, view, obj):
+        if not request.user.is_authenticated:
+            return False
+        if obj.owner == request.user:
+            return True
+        return obj.memberships.filter(user=request.user, role='ADMIN').exists()
+
+class IsWorkspaceWriter(permissions.BasePermission):
+    """
+    Permission checking that request.user is an OWNER, ADMIN, or MEMBER (not VIEWER).
+    """
+    def has_object_permission(self, request, view, obj):
+        if not request.user.is_authenticated:
+            return False
+        if obj.owner == request.user:
+            return True
+        return obj.memberships.filter(user=request.user, role__in=['ADMIN', 'MEMBER']).exists()
+
